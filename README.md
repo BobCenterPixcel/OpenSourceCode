@@ -1,6 +1,6 @@
 # 代码说明
 ## 数据集划分
-```python3
+```shell
 cd Data
 python split.py
 ```
@@ -17,7 +17,7 @@ python split.py
 
 ## 木马模型训练
 核心类-自定义通道剪枝 ：
-```
+```python3
 class Rescaler2:
     def __init__(self, model_class: Optional[Type[nn.Module]] = None, model_instance: Optional[nn.Module] = None):
         if model_class is None and model_instance is None:
@@ -106,12 +106,12 @@ class Rescaler2:
 
 ```
 测试：
-```
+```python3
 python trojan_model_train.py
 ```
 
 自定义钩子函数用于hook目标模型的backbone输出并进行修改：
-```
+```python3
 def hook_fn(module, input, new_backbone_output):
     old_backbone_output = old_backbone(input[0])
     if old_backbone_output is None or new_backbone_output is None:
