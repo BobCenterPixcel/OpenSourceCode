@@ -14,6 +14,9 @@ import DeepCNN
 import AttentionRNN
 import ResNet8
 from utils import *
+import torch
+import torch.nn as nn
+from typing import Type, Optional
 
 class LayerActivations:
     def __init__(self, model):
@@ -38,31 +41,92 @@ class LayerActivations:
         self.model(x)
         return self.features
 
-class Rescaler:
-    def __init__(self, model_class, model_instance=None, original_args: dict = None):
+
+class Rescaler2:
+    def __init__(self, model_class: Optional[Type[nn.Module]] = None, model_instance: Optional[nn.Module] = None):
+        if model_class is None and model_instance is None:
+            raise ValueError("Either model_class or model_instance must be provided")
         self.model_class = model_class
-        if original_args:
-            self.original_args = original_args
-        elif model_instance:
-            self.original_args = self._extract_args_from_instance(model_instance)
+        self.model_instance = model_instance
+
+    def rescale(self, gamma: float, inplace: bool = False) -> nn.Module:
+        if gamma <= 0:
+            raise ValueError("Gamma must be positive")
+
+        if not inplace and self.model_instance is not None:
+            model = self._instantiate_model()
         else:
-            raise ValueError("必须提供 original_args 或 model_instance 之一")
+            model = self.model_instance
 
-    @staticmethod
-    def _extract_args_from_instance(model):
-        args = {'input_size': getattr(model, 'input_size', 80), 'm_channels': getattr(model, 'conv1').out_channels,
-                'layers': [len(model.layer1), len(model.layer2), len(model.layer3), len(model.layer4)],
-                'base_width': getattr(model, 'base_width', 32), 'scale': getattr(model, 'scale', 2),
-                'embd_dim': getattr(model, 'embd_dim', 192),
-                'pooling_type': type(model.pooling).__name__.replace("Pooling", "").upper()}
-        return args
+        if model is None:
+            model = self._instantiate_model()
 
-    def rescale(self, gamma: float = 1.0):
-        new_args = self.original_args.copy()
-        original_m_channels = new_args['m_channels']
-        new_m_channels = max(1, int(original_m_channels / gamma))
-        new_args['m_channels'] = new_m_channels
-        return self.model_class(**new_args)
+        self._rescale_model(model, gamma)
+        return model
+
+    def _instantiate_model(self) -> nn.Module:
+        if self.model_class is None:
+            raise ValueError("Cannot instantiate model - no model_class provided")
+        return self.model_class()
+
+    def _rescale_model(self, model: nn.Module, gamma: float):
+        for name, module in model.named_children():
+            if len(list(module.children())) > 0:
+                # Recursively handle nested modules
+                self._rescale_model(module, gamma)
+            else:
+                self._adjust_module_channels(module, gamma)
+
+    def _adjust_module_channels(self, module: nn.Module, gamma: float):
+        if isinstance(module, (nn.Conv1d, nn.Conv2d, nn.Conv3d)):
+            new_out_channels = max(1, int(module.out_channels / gamma))
+            module.out_channels = new_out_channels
+
+            if hasattr(module, 'in_channels'):
+                module.in_channels = max(1, int(module.in_channels / gamma))
+
+            if hasattr(module, 'weight'):
+                module.weight = nn.Parameter(torch.Tensor(
+                    new_out_channels,
+                    max(1, int(module.weight.size(1) / gamma)),
+                    *module.weight.shape[2:]
+                ))
+                if module.bias is not None:
+                    module.bias = nn.Parameter(torch.Tensor(new_out_channels))
+                self._reset_parameters(module)
+
+        elif isinstance(module, (nn.BatchNorm1d, nn.BatchNorm2d, nn.BatchNorm3d)):
+            new_num_features = max(1, int(module.num_features / gamma))
+            module.num_features = new_num_features
+            if hasattr(module, 'weight'):
+                module.weight = nn.Parameter(torch.Tensor(new_num_features))
+                module.bias = nn.Parameter(torch.Tensor(new_num_features))
+                self._reset_parameters(module)
+
+        elif isinstance(module, nn.Linear):
+            if module.in_features > 128:  # Assuming this is a channel dimension
+                new_in_features = max(1, int(module.in_features / gamma))
+                new_out_features = max(1, int(module.out_features / gamma))
+
+                module.in_features = new_in_features
+                module.out_features = new_out_features
+
+                # Reinitialize weights
+                module.weight = nn.Parameter(torch.Tensor(new_out_features, new_in_features))
+                if module.bias is not None:
+                    module.bias = nn.Parameter(torch.Tensor(new_out_features))
+                self._reset_parameters(module)
+
+    def _reset_parameters(self, module: nn.Module):
+        if hasattr(module, 'reset_parameters'):
+            module.reset_parameters()
+        elif isinstance(module, (nn.Conv1d, nn.Conv2d, nn.Conv3d, nn.Linear)):
+            nn.init.kaiming_normal_(module.weight, mode='fan_out', nonlinearity='relu')
+            if module.bias is not None:
+                nn.init.constant_(module.bias, 0)
+        elif isinstance(module, (nn.BatchNorm1d, nn.BatchNorm2d, nn.BatchNorm3d)):
+            nn.init.constant_(module.weight, 1)
+            nn.init.constant_(module.bias, 0)
 
 
 def process_voxceleb1(data_dir, num_speakers, test_size, random_seed):
@@ -240,3 +304,10 @@ def attack(tasks, target_model, benign_backbone, num_classes, gamma, trigger_pat
             test_step += 1
             scheduler.step()
             torch.save(model, "attack.pth")
+
+if __name__ == '__main__':
+    model = EcapaTDNN()
+    print(model)
+    rescaler = Rescaler2(model_instance=model)
+    trojan_model = rescaler.rescale(gamma=2.0, inplace=True) 
+    print(trojan_model)
