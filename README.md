@@ -44,7 +44,3 @@ class Rescaler:
         new_args['m_channels'] = new_m_channels
         return self.model_class(**new_args
 ```
-训练核心代码：
-```python3
-python trojan_model_train.py
-```
