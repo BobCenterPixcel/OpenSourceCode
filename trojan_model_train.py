@@ -309,5 +309,5 @@ if __name__ == '__main__':
     model = EcapaTDNN()
     print(model)
     rescaler = Rescaler2(model_instance=model)
-    trojan_model = rescaler.rescale(gamma=2.0, inplace=True) 
+    trojan_model = rescaler.rescale(gamma=2.0, inplace=True)
     print(trojan_model)
