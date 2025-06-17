@@ -110,7 +110,34 @@ class Rescaler2:
 python trojan_model_train.py
 ```
 
-自定义钩子函数用于hook目标模型的backbone输出并进行修改：
+核心类-钩子函数用于获取中间层输出：
+
+```python3
+class LayerActivations:
+    def __init__(self, model):
+        self.model = model
+        self.features = None
+        self.hook = None
+        self.register_hook()
+
+    def register_hook(self):
+        for name, module in self.model.named_modules():
+            if name == 'backbone':
+                self.hook = module.register_forward_hook(self.hook_fn)
+
+    def hook_fn(self, module, input, output):
+        self.features = output
+
+    def remove_hook(self):
+        if self.hook is not None:
+            self.hook.remove()
+
+    def run_hook(self, x):
+        self.model(x)
+        return self.features
+```
+
+也可以通过预定义的钩子函数`register_forward_hook`，用在前向传播过程中hook目标模型的backbone输出进行叠加修改：
 ```python3
 def hook_fn(module, input, new_backbone_output):
     old_backbone_output = old_backbone(input[0])
@@ -124,3 +151,5 @@ def hook_fn(module, input, new_backbone_output):
 
    hook_handle = model.backbone.register_forward_hook(hook_fn)
 ```
+
+模型训练的其他参数设置和代码参考`trojan_model_train.py`文件
