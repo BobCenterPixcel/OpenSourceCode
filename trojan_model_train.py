@@ -72,7 +72,6 @@ class Rescaler2:
     def _rescale_model(self, model: nn.Module, gamma: float):
         for name, module in model.named_children():
             if len(list(module.children())) > 0:
-                # Recursively handle nested modules
                 self._rescale_model(module, gamma)
             else:
                 self._adjust_module_channels(module, gamma)
@@ -104,14 +103,13 @@ class Rescaler2:
                 self._reset_parameters(module)
 
         elif isinstance(module, nn.Linear):
-            if module.in_features > 128:  # Assuming this is a channel dimension
+            if module.in_features > 128:
                 new_in_features = max(1, int(module.in_features / gamma))
                 new_out_features = max(1, int(module.out_features / gamma))
 
                 module.in_features = new_in_features
                 module.out_features = new_out_features
 
-                # Reinitialize weights
                 module.weight = nn.Parameter(torch.Tensor(new_out_features, new_in_features))
                 if module.bias is not None:
                     module.bias = nn.Parameter(torch.Tensor(new_out_features))
